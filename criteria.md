@@ -25,9 +25,9 @@ Given a query that matches at least one listing, the agent completes all three
 tool calls and returns a fit card — in at least 4 of 5 tries.
 
 **Why this target:**
-<!-- Why 4 of 5 and not 5 of 5? Something about your search, probably —
-     "my search is a plain keyword match and some phrasings will miss" is a
-     real answer. -->
+First, initial retrieval uses plain keyword matching against listing descriptions, which can miss relevant items depending on how the query is phrased. 
+Second, two of the three tools (suggest_outfit and create_fit_card) rely on LLM generation, which introduces non-deterministic model calls that can occasionally fail
+Expecting 5 of 5 assumes perfect keyword matching and 100% LLM API stability.
 
 ---
 
@@ -37,65 +37,58 @@ Given a query that matches no listings, the agent stops before calling
 `suggest_outfit` and returns a message naming what to change — 5 of 5 tries.
 
 **Why this target:**
-<!-- Why is 5 of 5 reasonable here when criterion 1 isn't? What's different
-     about this path? -->
+Unlike criterion 1, this path relies on a deterministic control flow check directly in Python code. Because no LLM generation or non-deterministic tool calls occur before this early exit, the branching logic is entirely under our control and should execute with 100% reliability.
 
 ---
 
-## 3. Something about state
+## 3. State persists across tools
 
-<!-- YOU WRITE THIS ONE.
-
-     How would you know that the item your search found is the same item the
-     next tool received? Name something countable or observable.
-
-     This is the criterion people find hardest, because state failure doesn't
-     look like state failure — it looks like a tool problem. Something that
-     compares session["selected_item"] against what actually reached
-     suggest_outfit is the shape you're after. -->
-
-
+Across 5 distinct matching queries, the `id` in `session["selected_item"]["id"]`
+matches both the `id` recorded in `session["last_suggested_item_id"]` when
+`suggest_outfit` is called and the `id` recorded in
+`session["last_fit_card_item_id"]` when `create_fit_card` is called — 5 of 5 times.
 
 **Why this target:**
-
-
+State propagation is handled by explicit Python dictionary assignments in
+`agent.py`. Because passing data between session keys and tool inputs is purely
+deterministic code, any failure rate below 100% indicates a bug in the session
+management logic rather than model variance.
 
 ---
 
-## 4. Something about the fit card
+## 4. The fit card names the item, price, and platform
 
-<!-- YOU WRITE THIS ONE.
+Across 5 distinct matching queries, the text returned by `create_fit_card`
+contains all three of the following — 4 of 5 times:
 
-     The fit card calls a model, so the same input can produce different words
-     each time. That's not a bug — it's the nature of the tool. So what would
-     make it acceptable?
-
-     Think about what you'd actually be unhappy to see. A caption that never
-     mentions the price? Two different items producing the same opening
-     sentence? A card longer than a caption anyone would post? Any of those can
-     be turned into a number. -->
-
-
+- **Item name:** at least two words from the listing's `title`, case-insensitive
+  (e.g. "baby tee" for "Y2K Baby Tee — Butterfly Print").
+- **Price:** a `$` followed by the listing's price; `$18` and `$18.00` both count.
+- **Platform:** the listing's `platform` value, case-insensitive
+  (`ThredUp` counts for `thredUp`).
 
 **Why this target:**
-
-
+`create_fit_card` relies on the model to write the caption from a prompt that
+asks for the item, price, and platform. Because model output is
+non-deterministic, it can occasionally leave out a requested field, so 4 of 5
+is realistic while still enforcing output quality.
 
 ---
 
-## 5. Your choice
+## 5. Model failure is handled without a crash
 
-<!-- YOU WRITE THIS ONE TOO.
-
-     Pick something you actually care about getting right. Speed, the empty
-     wardrobe path, what happens when the model can't be reached, whether the
-     search respects a price ceiling — anything, as long as it names a number
-     or an observable outcome. -->
-
-
+With `CACHE_ENABLED = False` in `config.py` and an invalid API key
+(`sk-invalid`) in `.env`, across 5 distinct matching queries the agent catches
+the error, sets `session["fit_card"]` to `None`, and prints a user-facing
+message containing "error" or "try again", with no Python traceback in the
+output — 5 of 5 times.
 
 **Why this target:**
-
+Model calls in `agent.py` are wrapped in explicit `try/except` blocks. Since
+catching the exception and updating `session["fit_card"]` is fixed control
+flow, failure handling should succeed every time under a bad key. The cache is
+off so every query actually reaches the API; otherwise a cached answer would
+skip the failure entirely.
 
 
 ---
