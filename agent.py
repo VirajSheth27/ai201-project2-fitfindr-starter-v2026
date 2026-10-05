@@ -1,19 +1,14 @@
 """
 The FitFindr planning loop.
 
-This is the file that makes FitFindr an agent rather than a script. It decides
-which tool to run next based on what the last one returned.
-
-If your loop calls all three tools no matter what comes back, you have a list
-of function calls. A loop looks at the last result before it picks the next
-step. **That branch is the graded part of this unit.**
-
-Build and test your three tools in `tools.py` first. Then come here.
+Decides which tool to run next based on what the last one returned.
 
     python agent.py          runs both example paths below
 """
 
-import config
+import re
+
+import config  # noqa: F401
 import trace
 from tools import search_listings, suggest_outfit, create_fit_card
 from generate import ModelUnavailable
@@ -22,29 +17,68 @@ from generate import ModelUnavailable
 # ── session state ─────────────────────────────────────────────────────────────
 
 def new_session(query: str, wardrobe: dict) -> dict:
-    """
-    A fresh session for one user interaction.
-
-    The session is the single source of truth for a run. Every tool result goes
-    in here, and the next tool reads it back out.
-
-    You could pass values straight from one call to the next. It would work,
-    and you would not be able to test it — you can't print a variable you have
-    already overwritten. Going through the session is what makes the state
-    visible, and unit 4 has you write a criterion about exactly that.
-
-    Add fields if you need them.
-    """
+    """A fresh session for one user interaction. Single source of truth for a run."""
     return {
-        "query": query,              # what the user typed
-        "parsed": {},                # description / size / max_price you pulled out of it
-        "search_results": [],        # everything search_listings returned
-        "selected_item": None,       # the one you chose — goes into suggest_outfit
-        "wardrobe": wardrobe,        # the user's wardrobe
-        "outfit_suggestion": None,   # what suggest_outfit returned
-        "fit_card": None,            # what create_fit_card returned
-        "error": None,               # set when the run ended early
+        "query": query,                   # what the user typed
+        "parsed": {},                     # description / size / max_price
+        "search_results": [],             # everything search_listings returned
+        "selected_item": None,            # the one chosen, goes into suggest_outfit
+        "wardrobe": wardrobe,             # the user's wardrobe
+        "outfit_suggestion": None,        # what suggest_outfit returned
+        "fit_card": None,                 # what create_fit_card returned
+        "last_suggested_item_id": None,   # id of the item suggest_outfit received (criterion 3)
+        "last_fit_card_item_id": None,    # id of the item create_fit_card received (criterion 3)
+        "error": None,                    # set when the run ended early
     }
+
+
+# ── query parsing (regex) ─────────────────────────────────────────────────────
+
+_PRICE_RE = re.compile(
+    r"(?:under|below|less than|max|up to|<)\s*\$?\s*(\d+(?:\.\d+)?)|\$\s*(\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+_SIZE_RE = re.compile(r"\bsize\s+([A-Za-z0-9/]+)", re.IGNORECASE)
+_FILLER_RE = re.compile(r"\b(looking for|i want|i need|find me|show me)\b", re.IGNORECASE)
+
+
+def parse_query(query: str) -> dict:
+    """Pull description, size, and max_price out of plain text with regex."""
+    text = query or ""
+
+    max_price = None
+    price_match = _PRICE_RE.search(text)
+    if price_match:
+        max_price = float(price_match.group(1) or price_match.group(2))
+        text = text.replace(price_match.group(0), " ")
+
+    size = None
+    size_match = _SIZE_RE.search(text)
+    if size_match:
+        size = size_match.group(1).upper()
+        text = text.replace(size_match.group(0), " ")
+
+    text = _FILLER_RE.sub(" ", text)
+    description = re.sub(r"[,\s]+", " ", text).strip()
+
+    return {"description": description, "size": size, "max_price": max_price}
+
+
+def _no_results_message(parsed: dict) -> str:
+    """Say which filter to loosen, by re-running search with one filter removed."""
+    desc, size, price = parsed["description"], parsed["size"], parsed["max_price"]
+
+    if not desc:
+        return ("I couldn't find any item words in your request. "
+                "Try describing the item, e.g. 'graphic tee' or 'wide-leg pants'.")
+    if price is not None and search_listings(desc, size, None):
+        return (f"Nothing matching '{desc}' is under ${price:.0f}. "
+                f"Try raising your max price.")
+    if size and search_listings(desc, None, price):
+        return (f"Nothing matching '{desc}' comes in size {size}. "
+                f"Try a different size, or leave the size out.")
+    return (f"No listings matched '{desc}'. Try broader words, "
+            f"like 'tee' instead of 'band tee', or 'pants' instead of 'cords'.")
 
 
 # ── planning loop ─────────────────────────────────────────────────────────────
@@ -53,62 +87,66 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     """
     Run the loop once and return the finished session.
 
-    Args:
-        query:    what the user asked for, in plain language
-                  (e.g. "vintage graphic tee under $30, size M").
-        wardrobe: a wardrobe dict — get_example_wardrobe() or
-                  get_empty_wardrobe() from utils/data_loader.py.
-
-    Returns:
-        The session dict. **Check session["error"] first** — if it isn't None,
-        the run ended early and the later fields will still be None.
-
-    ─────────────────────────────────────────────────────────────────────────
-    TODO — build this, following the branch rule you wrote in Milestone 2.
-
-      1. Start a session with new_session().
-
-      2. Count the times round the loop, and call trace.check_iterations(count)
-         on each one before you go again. It raises when the count passes
-         MAX_ITERATIONS in config.py — see trace.py.
-
-      3. Parse the query into a description, a size, and a max_price. Regex,
-         string splitting, or asking the model are all fine — say which you
-         chose in your README. Put the result in session["parsed"].
-
-      4. Call search_listings() with what you parsed.
-         Put the results in session["search_results"].
-
-         ⚠️ THIS IS THE BRANCH. If nothing came back:
-              - put a message in session["error"] saying what the user could
-                change — "No results" is not that message
-              - return the session
-              - do NOT call suggest_outfit with nothing
-
-      5. Choose an item — the first result is fine. Put it in
-         session["selected_item"].
-
-      6. Call suggest_outfit() with the selected item and the wardrobe.
-         Put the result in session["outfit_suggestion"].
-
-      7. Call create_fit_card() with the outfit and the item.
-         Put the result in session["fit_card"].
-
-      8. Return the session.
-
-    ─────────────────────────────────────────────────────────────────────────
-    IN UNIT 4 you come back and add two things:
-
-      • Trace calls. One per step. `trace.step("search_listings", inputs=...,
-        returned=...)` — see trace.py. Your README needs the output.
-
-      • A handler for ModelUnavailable, so a bad key produces a message rather
-        than a stack trace. The import is already at the top of this file.
+    Each pass round the loop looks at the session and picks the next step.
+    BRANCH: if search_listings returns [], set session["error"] and stop.
+    suggest_outfit and create_fit_card are never called.
     """
     session = new_session(query, wardrobe)
+    next_step = "parse"
+    count = 0
 
-    # TODO: delete these two lines and build the loop.
-    session["error"] = "The planning loop isn't built yet — see the TODO in agent.py."
+    while next_step != "done":
+        count += 1
+        trace.check_iterations(count)
+
+        try:
+            if next_step == "parse":
+                session["parsed"] = parse_query(session["query"])
+                next_step = "search"
+
+            elif next_step == "search":
+                p = session["parsed"]
+                session["search_results"] = search_listings(
+                    p["description"], p["size"], p["max_price"]
+                )
+                # ── THE BRANCH ──
+                if not session["search_results"]:
+                    session["error"] = _no_results_message(p)
+                    next_step = "done"
+                else:
+                    next_step = "select"
+
+            elif next_step == "select":
+                session["selected_item"] = session["search_results"][0]
+                next_step = "outfit"
+
+            elif next_step == "outfit":
+                item = session["selected_item"]          # read from session
+                session["last_suggested_item_id"] = item["id"]
+                session["outfit_suggestion"] = suggest_outfit(item, session["wardrobe"])
+                next_step = "fit_card"
+
+            elif next_step == "fit_card":
+                item = session["selected_item"]          # read from session
+                session["last_fit_card_item_id"] = item["id"]
+                session["fit_card"] = create_fit_card(session["outfit_suggestion"], item)
+                next_step = "done"
+
+        except ModelUnavailable as e:
+            session["fit_card"] = None
+            session["error"] = (
+                f"Model error during '{next_step}': the model couldn't be reached "
+                f"({type(e).__name__}). Check your API key in .env, then try again."
+            )
+            next_step = "done"
+        except Exception as e:
+            session["fit_card"] = None
+            session["error"] = (
+                f"Unexpected error during '{next_step}': {type(e).__name__}. "
+                f"Please try again."
+            )
+            next_step = "done"
+
     return session
 
 
@@ -122,6 +160,9 @@ def _show(session: dict) -> None:
 
     item = session["selected_item"] or {}
     print(f"  found:    {item.get('title')} — ${item.get('price')} on {item.get('platform')}")
+    print(f"  ids:      selected={item.get('id')} "
+          f"outfit={session['last_suggested_item_id']} "
+          f"card={session['last_fit_card_item_id']}")
     print(f"  outfit:   {session['outfit_suggestion']}")
     print(f"  fit card: {session['fit_card']}")
 

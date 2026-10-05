@@ -176,7 +176,9 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
         )
 
     prompt = (
-        "Write a 2-4 sentence caption for a social media post about a thrifted find.\n"
+        "Write a 2-4 sentence caption for a social media post by someone who just "
+        "BOUGHT this thrifted item and is showing off how they styled it. "
+        "They found it on the platform below; they are not selling it.\n"
         f"Item: {new_item.get('title')}\n"
         f"Price: ${float(new_item.get('price', 0)):.0f}\n"
         f"Platform: {new_item.get('platform')}\n"

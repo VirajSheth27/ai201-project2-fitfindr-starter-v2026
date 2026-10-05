@@ -110,6 +110,8 @@ FitFindr is a thrifting agent. A user types what they want in plain language, li
 
 **How the query is parsed:**  Regex, in `agent.py::parse_query`. A price is pulled from phrases like "under $30" or "$30", a size from "size M", and filler like "looking for" is stripped. What's left becomes the description.
 
+**How the empty-search message is chosen:** `agent.py::_no_results_message` re-runs the search with one filter removed at a time. If dropping the price finds results, it says to raise the price. If dropping the size finds results, it says to change the size. Otherwise it says to use broader words.
+
 **What moves through the session:** `query` → `parsed` (description, size, max_price) → `search_results` → `selected_item` → `last_suggested_item_id` + `outfit_suggestion` → `last_fit_card_item_id` + `fit_card`. Each tool reads its inputs from the session, not from the previous call's return value. If a model call fails, the loop catches `ModelUnavailable`, sets `session["error"]`, leaves `fit_card` as `None`, and stops.
 
 ---
@@ -124,9 +126,21 @@ FitFindr is a thrifting agent. A user types what they want in plain language, li
 **One full query**
 
 ```
-$ python app.py ask '...'
+$ python agent.py
+=== A query the data can match ===
+  found:    Y2K Baby Tee — Butterfly Print — $18.0 on depop
+  ids:      selected=lst_002 outfit=lst_002 card=lst_002
+  outfit:   Outfit 1: Pair the Y2K butterfly baby tee with your baggy straight-leg jeans for that classic early-2000s contrast. Add the chunky white sneakers and the black crossbody bag for a casual, effortless streetwear look.
 
+Outfit 2: Tuck the baby tee into your wide-leg khaki trousers, accented by the brown leather belt to tie the earth tones together. Finish the outfit with the black combat boots to add a subtle grunge edge to the sweet butterfly graphic.
+  fit card: Still not over scoring this butterfly baby tee on Depop for just $18! I'm totally obsessed with how it looks dressed down with baggy denim and chunky sneakers, but I think styling it with khakis and combat boots for that sweet-meets-grunge vibe is my new favorite combo. #y2kstyle #thriftedfashion
+
+=== A query it can't ===
+  stopped: No listings matched 'designer ballgown'. Try broader words, like 'tee' instead of 'band tee', or 'pants' instead of 'cords'.
+  fit_card is None — it should still be None here
 ```
+
+The happy path calls all three tools, and the same item id (`lst_002`) reaches both `suggest_outfit` and `create_fit_card`. The impossible query stops at the branch, and `fit_card` stays `None`.
 
 **The three tools, tested one at a time**
 
@@ -174,17 +188,20 @@ Couldn't write a fit card: no outfit suggestion was provided for Vintage Levi's 
      "I gave Claude my search_listings spec. It returned None on no match
      instead of an empty list, so I changed it" is the level we want. -->
 
+I also used AI to help generate the code
+
 **Moment 1**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- *What I asked for:* I gave Claude my `search_listings` spec and asked for an implementation.
+- *What came back:* Keyword scoring where every hit counted equally, wherever it appeared in the listing. When I tested `'graphic tee'`, a mesh long-sleeve top ranked first, because its description says "layering under a graphic tee", and it beat the real tees on price.
+- *What I changed:* I weighted hits in the title and style_tags at 3 and description hits at 1, and added a bonus when the whole phrase matches a tag or the title. The butterfly graphic tee now ranks first, and the mesh top dropped to fifth.
 
 **Moment 2**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- *What I asked for:* I pasted my three acceptance criteria into Claude and asked how it would test each one using only what the sentence said.
+- *What came back:* It couldn't test my state criterion, because I compared `item_id`, a field the listings don't have (they use `id`), and nothing recorded what `suggest_outfit` actually received. It also pointed out that checking the item name in the fit card made a "deterministic, 5 of 5" criterion depend on model output, and that a cached answer would hide a bad API key in my error-handling test.
+- *What I changed:* I switched to `id`, added `last_suggested_item_id` and `last_fit_card_item_id` to the session so the comparison is observable, dropped the fit card name check from criterion 3, and required `CACHE_ENABLED = False` in criterion 5.
+
 
 <!-- ═══════════════════════ UNIT 4 — THE TEST ═══════════════════════
 
