@@ -60,7 +60,7 @@ Notes from reading `data/listings.json` (Milestone 1).
 
 ## What This Does
 
-<!-- Three or four sentences: what a user asks for, and what they get back. -->
+FitFindr is a thrifting agent. A user types what they want in plain language, like `'vintage graphic tee under $30, size M'`, and the agent parses out a description, size, and price ceiling, then searches the listings data for matches. If it finds something, it takes the best match, suggests one or two outfits using pieces from the user's wardrobe (or general styling advice if the wardrobe is empty), and writes a short caption someone would actually post. If nothing matches, it stops before calling the model and tells the user which filter to loosen: the price, the size, or the keywords.
 
 
 
@@ -108,9 +108,9 @@ Notes from reading `data/listings.json` (Milestone 1).
 
 **Where it lives:** `agent.py::run_agent`
 
-**How the query is parsed:** <!-- regex, string splitting, or asking the model — say which -->
+**How the query is parsed:**  Regex, in `agent.py::parse_query`. A price is pulled from phrases like "under $30" or "$30", a size from "size M", and filler like "looking for" is stripped. What's left becomes the description.
 
-**What moves through the session:** <!-- which fields, in what order -->
+**What moves through the session:** `query` → `parsed` (description, size, max_price) → `search_results` → `selected_item` → `last_suggested_item_id` + `outfit_suggestion` → `last_fit_card_item_id` + `fit_card`. Each tool reads its inputs from the session, not from the previous call's return value. If a model call fails, the loop catches `ModelUnavailable`, sets `session["error"]`, leaves `fit_card` as `None`, and stops.
 
 ---
 
@@ -131,18 +131,36 @@ $ python app.py ask '...'
 **The three tools, tested one at a time**
 
 ```
-$ python -c "from tools import search_listings; print(search_listings('graphic tee', max_price=30))"
+$ python -c "from tools import search_listings; print([(i['id'], i['title']) for i in search_listings('graphic tee', max_price=30)])"
+[('lst_002', 'Y2K Baby Tee — Butterfly Print'), ('lst_033', 'Vintage Band Tee — Faded Grey'), ('lst_006', 'Graphic Tee — 2003 Tour Bootleg Style'), ('lst_015', 'Vintage Graphic Hoodie — Faded Black'), ('lst_017', 'Mesh Long-Sleeve Top — Black'), ('lst_012', 'Oversized Crewneck Sweatshirt — Vintage Navy'), ('lst_011', 'Low-Rise Cargo Pants — Khaki')]
 
+$ python -c "from tools import search_listings; print(search_listings('sequin ballgown'))"
+[]
+
+$ python -c "from tools import search_listings; print([i['size'] for i in search_listings('tee', size='L')])"
+['L', 'L']
 ```
 
 ```
-$ python -c "from tools import suggest_outfit; ..."
+$ python -c "from tools import suggest_outfit; from utils.data_loader import get_example_wardrobe, load_listings; print(suggest_outfit(load_listings()[0], get_example_wardrobe()))"
+Outfit 1: Pair the vintage Levi's with the white ribbed tank top, black cropped zip hoodie layered on top, and chunky white sneakers for a classic streetwear look. Add the black crossbody bag to complete the outfit.
 
+Outfit 2: Combine the jeans with the oversized grey crewneck sweatshirt tucked in slightly at the front, paired with the black combat boots and the brown leather belt for a relaxed, vintage-inspired everyday fit.
+
+$ python -c "from tools import suggest_outfit; from utils.data_loader import get_empty_wardrobe, load_listings; print(suggest_outfit(load_listings()[0], get_empty_wardrobe()))"
+For a casual everyday look, pair the vintage Levi's 501 jeans with a plain white crewneck t-shirt and classic canvas low-top sneakers. Layer with an oversized black leather biker jacket for a touch of edge.
+
+For a slightly smarter weekend outfit, combine the jeans with a relaxed-fit oatmeal knit crewneck sweater and brown leather Chelsea boots. Add a minimal black leather belt to tie the look together. Both outfits offer a timeless streetwear aesthetic that highlights the classic medium wash of the denim.
 ```
 
 ```
-$ python -c "from tools import create_fit_card; ..."
+$ python -c "from tools import create_fit_card; from utils.data_loader import load_listings; print(create_fit_card('jeans and white sneakers', load_listings()[0]))"
+Run 1: Nothing beats the wash on these vintage Levi's 501s, especially for just $38. I've been living in them with a crisp pair of white sneakers for the ultimate effortless 90s street style. Snagged these over on depop before anyone else could. #vintage #denim
+Run 2: <PASTE, with CACHE_ENABLED = False>
+Run 3: <PASTE, with CACHE_ENABLED = False>
 
+$ python -c "from tools import create_fit_card; from utils.data_loader import load_listings; print(create_fit_card('   ', load_listings()[0]))"
+Couldn't write a fit card: no outfit suggestion was provided for Vintage Levi's 501 Jeans — Medium Wash.
 ```
 
 ---

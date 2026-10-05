@@ -56,6 +56,25 @@ def _listing_words(item: dict) -> set[str]:
     ]
     return set(re.findall(r"[a-z0-9']+", " ".join(parts).lower()))
 
+def _score(item: dict, keywords: list[str]) -> int:
+    """Title and style_tags hits are worth more than description hits,
+    and the whole phrase matching a tag or the title is worth most."""
+    strong_text = " ".join([item.get("title") or "", " ".join(item.get("style_tags") or [])]).lower()
+    strong_words = set(re.findall(r"[a-z0-9']+", strong_text))
+    weak_words = _listing_words(item)
+
+    score = 0
+    for k in keywords:
+        if _keyword_hit(k, strong_words):
+            score += 3
+        elif _keyword_hit(k, weak_words):
+            score += 1
+
+    phrase = " ".join(keywords)
+    if len(keywords) > 1 and phrase in strong_text:
+        score += 5
+    return score
+
 
 def _keyword_hit(keyword: str, words: set[str]) -> bool:
     # Simple plural handling: "tees" matches "tee", "tee" matches "tees"
@@ -105,8 +124,7 @@ def search_listings(
         if size and not _size_matches(item.get("size"), size):
             continue
 
-        words = _listing_words(item)
-        score = sum(1 for k in keywords if _keyword_hit(k, words))
+        score = _score(item, keywords)
         if score > 0:
             scored.append((score, item))
 
