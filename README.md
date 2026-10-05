@@ -35,6 +35,27 @@
      gets none.
      ───────────────────────────────────────────────────────────────────────── -->
 
+## Data Notes
+
+Notes from reading `data/listings.json` (Milestone 1).
+
+**Listing fields:** `id`, `title`, `description`, `category`, `style_tags` (list),
+`size`, `condition`, `price` (float), `colors` (list), `brand` (str or None), `platform`.
+
+**What I noticed:**
+
+- **Sizes are inconsistent.** Examples: `"M"`, `"S/M"`, `"XL (oversized)"`,
+  `"W30 L30"`, `"W28"`. A plain substring test would be wrong (`"l" in "xl"` is
+  True), so size matching has to compare whole size tokens, not characters.
+- **`brand` is often `null`**, so no code or prompt can assume a brand exists.
+- **`style_tags` holds multi-word tags** like `"graphic tee"` and `"band tee"`,
+  which makes it the most useful field for keyword matching.
+- **Some listings describe their own fit**, e.g. the butterfly baby tee is tagged
+  `"S/M"` but its description says it fits like a small.
+- **Platforms seen:** depop, thredUp, poshmark.
+
+---
+
 <!-- ═══════════════════════ UNIT 3 — THE BUILD ═══════════════════════ -->
 
 ## What This Does
