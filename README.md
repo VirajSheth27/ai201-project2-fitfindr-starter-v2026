@@ -68,36 +68,26 @@ Notes from reading `data/listings.json` (Milestone 1).
 
 ## Tool Inventory
 
-<!-- Four lines per tool. This is worth 2 points and it's the single most
-     common place students lose them.
-
-     "Returns a list" earns NOTHING. The description has to say what is IN
-     the list.
-
-     The empty case isn't optional either — it's the thing your loop branches
-     on, and if you don't decide it here you'll discover it as a crash in
-     Milestone 5. -->
-
 ### `search_listings`
 
-- **What it does:**
-- **Inputs:** <!-- name and type each: `max_price` (float), not "a price" -->
-- **Returns:**
-- **When it has nothing:**
+- **What it does:** Filters `data/listings.json` by price and size, then ranks what's left by how many query keywords appear in the listing's title, description, category, brand, style_tags, and colors.
+- **Inputs:** `description` (str), `size` (str or None), `max_price` (float or None). Size matches when every token of the requested size appears as a whole token in the listing's size, so `"M"` matches `"M"` and `"S/M"` but `"L"` does not match `"XL"`. `max_price` is inclusive.
+- **Returns:** `list[dict]` of listing dicts, highest keyword score first and cheaper first on ties, at most `config.SEARCH_RESULT_LIMIT` items. Each dict has `id`, `title`, `description`, `category`, `style_tags`, `size`, `condition`, `price`, `colors`, `brand`, `platform`.
+- **When it has nothing:** Returns `[]`, an empty list. Never `None`, never raises. This also happens when the description has no usable keywords.
 
 ### `suggest_outfit`
 
-- **What it does:**
-- **Inputs:**
-- **Returns:**
-- **When it has nothing:**
+- **What it does:** Asks the model for one or two outfits built around the new item, using pieces from the user's wardrobe when there are any.
+- **Inputs:** `new_item` (dict, one listing dict from `search_listings`), `wardrobe` (dict with an `items` key holding a list of wardrobe item dicts).
+- **Returns:** `str`, a non-empty plain-text suggestion of one or two outfits under about 100 words. With a non-empty wardrobe it names specific pieces the user owns.
+- **When it has nothing:** If `wardrobe["items"]` is empty or missing, it returns general styling advice naming kinds of pieces to pair. If the model returns an empty string, it returns a fallback sentence instead. It never returns `""`.
 
 ### `create_fit_card`
 
-- **What it does:**
-- **Inputs:**
-- **Returns:**
-- **When it has nothing:**
+- **What it does:** Asks the model for a short caption someone would post about the find.
+- **Inputs:** `outfit` (str, the output of `suggest_outfit`), `new_item` (dict, the same listing dict).
+- **Returns:** `str`, a 2–4 sentence caption that mentions the item, price, and platform once each, with at most two hashtags.
+- **When it has nothing:** If `outfit` is empty or whitespace, it returns the message `"Couldn't write a fit card: no outfit suggestion was provided for <title>."` without calling the model.
 
 ---
 
@@ -114,7 +104,7 @@ Notes from reading `data/listings.json` (Milestone 1).
      The grader checks your code against what you claim here, so the file and
      function have to be real. -->
 
-**Branch rule:**
+**Branch rule:** If `search_listings` returns an empty list, put a message in `session["message"]` saying which filter to loosen (price, size, or keywords), and stop without calling `suggest_outfit` or `create_fit_card`. Otherwise, store the first result in `session["selected_item"]` and go to `suggest_outfit`.
 
 **Where it lives:** `agent.py::run_agent`
 
