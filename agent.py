@@ -93,6 +93,9 @@ def _no_results_message(parsed: dict) -> str:
 
 
 # ── planning loop ─────────────────────────────────────────────────────────────
+def _fmt(d: dict) -> str:
+    """Readable key=value text for the trace (trace.py collapses plain dicts)."""
+    return ", ".join(f"{k}={v!r}" for k, v in d.items())
 
 def run_agent(query: str, wardrobe: dict) -> dict:
     """
@@ -103,6 +106,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     suggest_outfit and create_fit_card are never called.
     """
     session = new_session(query, wardrobe)
+    trace.start_trace()
     next_step = "parse"
     count = 0
 
@@ -113,6 +117,8 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         try:
             if next_step == "parse":
                 session["parsed"] = parse_query(session["query"])
+                trace.step("parse_query", inputs=session["query"],
+                            returned=_fmt(session["parsed"]))
                 next_step = "search"
 
             elif next_step == "search":
@@ -123,40 +129,60 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                 # ── THE BRANCH ──
                 if not session["search_results"]:
                     session["error"] = _no_results_message(p)
+                    trace.step("search_listings (via MCP)", inputs=_fmt(p),
+                               returned=session["search_results"],
+                               note="branch: empty results, stopping before suggest_outfit")
                     next_step = "done"
                 else:
+                    trace.step("search_listings (via MCP)", inputs=_fmt(p),
+                               returned=session["search_results"],
+                               note="branch: results found, continuing")
                     next_step = "select"
 
             elif next_step == "select":
                 session["selected_item"] = session["search_results"][0]
+                trace.step("select_item", returned=session["selected_item"],
+                           note=f"took first result, id={session['selected_item']['id']}")
                 next_step = "outfit"
 
             elif next_step == "outfit":
                 item = session["selected_item"]          # read from session
                 session["last_suggested_item_id"] = item["id"]
+                pieces = len((session["wardrobe"] or {}).get("items") or [])
                 session["outfit_suggestion"] = suggest_outfit(item, session["wardrobe"])
+                trace.step("suggest_outfit",
+                           inputs=_fmt({"item_id": item["id"], "wardrobe_items": pieces}),
+                           returned=session["outfit_suggestion"],
+                           note="empty wardrobe, general advice" if pieces == 0 else "")
                 next_step = "fit_card"
 
             elif next_step == "fit_card":
                 item = session["selected_item"]          # read from session
                 session["last_fit_card_item_id"] = item["id"]
                 session["fit_card"] = create_fit_card(session["outfit_suggestion"], item)
+                trace.step("create_fit_card",
+                            inputs=_fmt({"item_id": item["id"],
+                                        "outfit": session["outfit_suggestion"][:60] + "…"}),
+                           returned=session["fit_card"])
                 next_step = "done"
 
-        except MCPError as e:
+        except MCPError:
             session["error"] = (
                 f"Search error: the listings service (MCP server) couldn't be "
                 f"reached during '{next_step}'. Check that mcp_server.py runs "
                 f"on its own (python mcp_server.py), then try again."
             )
+            trace.step(f"{next_step} FAILED", returned=session["error"],
+                       note="MCPError, stopping")
             next_step = "done"
-
         except ModelUnavailable as e:
             session["fit_card"] = None
             session["error"] = (
                 f"Model error during '{next_step}': the model couldn't be reached "
                 f"({type(e).__name__}). Check your API key in .env, then try again."
             )
+            trace.step(f"{next_step} FAILED", returned=session["error"],
+                       note="ModelUnavailable, stopping")
             next_step = "done"
         except Exception as e:
             session["fit_card"] = None
@@ -164,6 +190,8 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                 f"Unexpected error during '{next_step}': {type(e).__name__}. "
                 f"Please try again."
             )
+            trace.step(f"{next_step} FAILED", returned=session["error"],
+                       note=f"{type(e).__name__}, stopping")
             next_step = "done"
 
     return session

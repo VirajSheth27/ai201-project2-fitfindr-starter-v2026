@@ -272,33 +272,90 @@ that produced it:
 
 ## Loop Trace
 
-<!-- One full run, printed step by step, with the MCP call visible in it.
+## Loop Trace
 
-     `python app.py ask '...' --trace` once you've added the trace.step()
-     calls in Milestone 2.
-
-     Worth pasting BOTH the happy path and the empty-search path. The empty
-     one should be visibly shorter, because it stops. If your two traces are
-     the same length, your branch isn't working — and this is the fastest way
-     anyone will ever find that out. -->
+`search_listings` runs through the MCP server, shown as `search_listings (via MCP)` in step 2. Traces come from `trace.step()` calls in `agent.py::run_agent`.
 
 **Happy path**
 
 ```
-
+$ python app.py ask 'vintage graphic tee under $30' --trace
+[1] parse_query
+      in:  vintage graphic tee under $30
+      out: description='vintage graphic tee', size=None, max_price=30.0
+[2] search_listings (via MCP)
+      in:  description='vintage graphic tee', size=None, max_price=30.0
+      out: 10 items: Y2K Baby Tee — Butterfly Print, Vintage Band Tee — Faded Grey, Graphic Tee — 2003 Tour Bootleg Style … +7 more
+      →    branch: results found, continuing
+[3] select_item
+      out: Y2K Baby Tee — Butterfly Print ($18.0, depop)
+      →    took first result, id=lst_002
+[4] suggest_outfit
+      in:  item_id='lst_002', wardrobe_items=10
+      out: Outfit 1: Pair the Y2K butterfly baby tee with your baggy straight-leg jeans for that classic early-2000s cont…
+[5] create_fit_card
+      in:  item_id='lst_002', outfit='Outfit 1: Pair the Y2K butterfly baby tee with your baggy st…'
+      out: Still not over scoring this butterfly baby tee on Depop for just $18! I'm totally obsessed with how it looks d…
 ```
 
 **Empty search**
 
 ```
+$ python app.py ask 'designer ballgown size XXS under $5' --trace
+[1] parse_query
+      in:  designer ballgown size XXS under $5
+      out: description='designer ballgown', size='XXS', max_price=5.0
+[2] search_listings (via MCP)
+      in:  description='designer ballgown', size='XXS', max_price=5.0
+      out: [] (empty)
+      →    branch: empty results, stopping before suggest_outfit
 
+  No listings matched 'designer ballgown'. Try broader words, like 'tee' instead of 'band tee', or 'pants' instead of 'cords'.
+
+0 model calls this session
 ```
 
-**On the MCP move:** <!-- what changed in your code, and whether anything
-behaved differently afterwards. If the rewire didn't work, say exactly where it
-broke — the error text and the last thing that worked. That earns the point in
-full. -->
+The empty path stops at step 2 and makes zero model calls. The happy path runs all five steps. The same item id (`lst_002`) appears at select, `suggest_outfit`, and `create_fit_card`.
 
+### Failure modes, triggered on purpose
+
+**1. Empty search.** `python app.py ask 'designer ballgown size XXS under $5'` stops at the branch (trace above). `fit_card` stays `None`, and no model calls are made.
+
+**2. Empty wardrobe.** `python app.py ask 'denim jacket under $50' --empty-wardrobe` runs normally, and `suggest_outfit` returns general advice instead of crashing or returning `""`:
+
+```
+[4] suggest_outfit
+      in:  item_id='lst_007', wardrobe_items=0
+      out: Since your wardrobe is currently empty, here are two versatile outfits to build around your Wrangler denim jac…
+      →    empty wardrobe, general advice
+```
+
+**3. Model unavailable.** Changing one character of the key in `.env` didn't trigger a failure for me. My first run after the edit still made 2 real model calls, and no system environment variable was overriding `.env`. So I forced it the way the assignment allows: I temporarily added `raise ModelUnavailable("forced for testing")` at the top of `tools.py::suggest_outfit`, ran a new query, then removed it (`git diff tools.py` is clean).
+
+```
+$ python app.py ask 'tan suede boots under $50' --trace
+[1] parse_query
+      in:  tan suede boots under $50
+      out: description='tan suede boots', size=None, max_price=50.0
+[2] search_listings (via MCP)
+      in:  description='tan suede boots', size=None, max_price=50.0
+      out: 7 items: Suede Chelsea Boots — Tan, Mini Shoulder Bag — Tan Leather, Bucket Hat — Reversible, Brown Plaid … +4 more
+      →    branch: results found, continuing
+[3] select_item
+      out: Suede Chelsea Boots — Tan ($44.0, poshmark)
+      →    took first result, id=lst_028
+[4] outfit FAILED
+      out: Model error during 'outfit': the model couldn't be reached (ModelUnavailable). Check your API key in .env, the…
+      →    ModelUnavailable, stopping
+
+  Model error during 'outfit': the model couldn't be reached (ModelUnavailable). Check your API key in .env, then try again.
+```
+
+The `ModelUnavailable` handler in `agent.py::run_agent` catches it, stops the loop, leaves `fit_card` as `None`, and shows no traceback. My first attempt put the forced `raise` at module level in `tools.py`, so it fired on import, before the agent ran, and `app.py` printed the raw `ModelUnavailable: forced for testing`. The empty trace was the clue.
+
+**Finding from failure testing (not fixed in M2):** `python app.py ask 'black combat boots under $60'` reported success but selected **Biker Shorts — Black**. The catalog's only boot under $60, **Suede Chelsea Boots — Tan ($44)**, ranked 6th. In `tools.py::_score`, "black" in the shorts' title and "boots" in the boots' title each score +3, and the tie goes to the cheaper item. The scorer weights a color word the same as the word naming the item, so the agent returns a confident wrong result with no error.
+
+**On the MCP move:** I registered `search_listings` in `mcp_server.py` with a typed signature and a description written for an outside agent (inputs with units, size-matching rule, return fields, empty case). In `agent.py`, `run_agent` and `_no_results_message` now call it through `mcp_client.call_tool` via a `_search()` helper, and a new `except MCPError` handler covers the server being unreachable. Nothing behaved differently afterward. A direct call and an MCP call on the same input returned identical results (`a == b` → `True 7 7`), and the empty case still came back as `[]`. The one fix the move forced was in the description itself: my first draft claimed "One Size" listings match any size request, which the code doesn't do, so I removed it rather than publish a contract the tool breaks.
 
 
 ---
