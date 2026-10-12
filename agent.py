@@ -12,6 +12,9 @@ import config  # noqa: F401
 import trace
 from tools import search_listings, suggest_outfit, create_fit_card
 from generate import ModelUnavailable
+from tools import suggest_outfit, create_fit_card
+from mcp_client import call_tool, MCPError
+from generate import ModelUnavailable
 
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -63,6 +66,14 @@ def parse_query(query: str) -> dict:
 
     return {"description": description, "size": size, "max_price": max_price}
 
+def _search(description, size, max_price) -> list[dict]:
+    """search_listings, called through the MCP server instead of directly."""
+    return call_tool("search_listings", {
+        "description": description,
+        "size": size,
+        "max_price": max_price,
+    })
+
 
 def _no_results_message(parsed: dict) -> str:
     """Say which filter to loosen, by re-running search with one filter removed."""
@@ -71,10 +82,10 @@ def _no_results_message(parsed: dict) -> str:
     if not desc:
         return ("I couldn't find any item words in your request. "
                 "Try describing the item, e.g. 'graphic tee' or 'wide-leg pants'.")
-    if price is not None and search_listings(desc, size, None):
+    if price is not None and _search(desc, size, None):
         return (f"Nothing matching '{desc}' is under ${price:.0f}. "
                 f"Try raising your max price.")
-    if size and search_listings(desc, None, price):
+    if size and _search(desc, None, price):
         return (f"Nothing matching '{desc}' comes in size {size}. "
                 f"Try a different size, or leave the size out.")
     return (f"No listings matched '{desc}'. Try broader words, "
@@ -106,7 +117,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
 
             elif next_step == "search":
                 p = session["parsed"]
-                session["search_results"] = search_listings(
+                session["search_results"] = _search(
                     p["description"], p["size"], p["max_price"]
                 )
                 # ── THE BRANCH ──
@@ -131,6 +142,14 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                 session["last_fit_card_item_id"] = item["id"]
                 session["fit_card"] = create_fit_card(session["outfit_suggestion"], item)
                 next_step = "done"
+
+        except MCPError as e:
+            session["error"] = (
+                f"Search error: the listings service (MCP server) couldn't be "
+                f"reached during '{next_step}'. Check that mcp_server.py runs "
+                f"on its own (python mcp_server.py), then try again."
+            )
+            next_step = "done"
 
         except ModelUnavailable as e:
             session["fit_card"] = None

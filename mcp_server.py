@@ -67,22 +67,39 @@ from tools import search_listings as _search_listings_impl  # noqa: F401 — you
 mcp = FastMCP("fitfindr", log_level="WARNING")
 
 
-# ── TODO: uncomment and fill this in ──────────────────────────────────────────
-#
-# @mcp.tool()
-# def search_listings(
-#     description: str,
-#     size: str | None = None,
-#     max_price: float | None = None,
-# ) -> list[dict]:
-#     """
-#     <-- YOUR DESCRIPTION GOES HERE.
-#
-#         One or two sentences. What does this tool do, what does it need, and
-#         what does it give back when it finds nothing? Written for a reader
-#         who cannot see the code.
-#     """
-#     return _search_listings_impl(description, size, max_price)
+@mcp.tool()
+def search_listings(
+    description: str,
+    size: str | None = None,
+    max_price: float | None = None,
+) -> list[dict]:
+    """
+    Search a fixed catalog of 40 secondhand clothing listings and return the
+    best matches.
+
+    Inputs:
+    - description (string, required): free text, e.g. "vintage graphic tee".
+      It is split into keywords (common filler words like "the" or "under" are
+      ignored) and matched against each listing's title, description,
+      category, brand, style tags, and colors. A listing must match at least
+      one keyword to be returned.
+    - size (string, optional): matched as whole size tokens, case-insensitive.
+      "M" matches listings sized "M" or "S/M", but "L" does not match "XL".
+      Omit or pass null to skip size filtering.
+    - max_price (number, optional): price ceiling in US dollars, inclusive
+      (30 means $30.00 or less). Omit or pass null to skip price filtering.
+
+    Returns: a list of listing objects, best match first. Matches in the title
+    or style tags rank above matches only in the description; ties go to the
+    cheaper item. At most config.SEARCH_RESULT_LIMIT results. Each object has:
+    id, title, description, category, style_tags (list), size, condition,
+    price (number), colors (list), brand (string or null), platform.
+
+    When nothing matches, or the description has no usable keywords, returns
+    an empty list []. It never returns null and never raises for no matches.
+    """
+    return _search_listings_impl(description, size, max_price)
+
 #
 # ──────────────────────────────────────────────────────────────────────────────
 #
