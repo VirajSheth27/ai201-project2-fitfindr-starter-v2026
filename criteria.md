@@ -29,6 +29,18 @@ First, initial retrieval uses plain keyword matching against listing description
 Second, two of the three tools (suggest_outfit and create_fit_card) rely on LLM generation, which introduces non-deterministic model calls that can occasionally fail
 Expecting 5 of 5 assumes perfect keyword matching and 100% LLM API stability.
 
+> **Revised in unit 4:** Given a query that matches at least one listing, the
+> agent completes all three tool calls and returns a fit card for an item whose
+> title contains the item word the user asked for (the last word of the parsed
+> description, e.g. "boots", "tee", "jacket") — in at least 4 of 5 tries,
+> scored on the `black combat boots under $60` query.
+>
+> **Why revised:** The original measured the wrong thing. On
+> `black combat boots under $60`, the agent selected Biker Shorts in 5 of 5
+> tries and still passed criterion 1, because the criterion only checked that a
+> fit card came back, not that it was for the item asked about. The target
+> (4 of 5) is unchanged; what's scored is now whether the right item was found.
+
 ---
 
 ## 2. An impossible query stops before the second tool

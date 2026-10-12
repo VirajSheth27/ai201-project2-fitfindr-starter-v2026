@@ -212,26 +212,61 @@ I also used AI to help generate the code
 
 ## Run Log — Before
 
-<!-- Five criteria, five tries each, in this exact format.
+From `results/run_2026-10-12_0457_before.md` (criteria 1–4) and `results/run_2026-10-12_0500_before-c5.md` (criterion 5), produced by `run_eval.py::main` with caching off and temperature 0.9.
 
-     Five, because your criteria are written out of five. Mark each try PASS
-     or FAIL, count the passes, and read that count against your target — a
-     row targeting 4 of 5 with three PASS cells is MISSED (3/5).
-
-     `python run_eval.py --label before` runs everything and writes the table
-     into results/. Paste it here and fill in the verdicts. -->
+**Scoring rule, set in `scenarios.py` before running:** criteria 1 and 2 use one scenario × 5 tries. Criteria 3, 4, and 5 each say "across 5 distinct matching queries", so each has 5 scenarios (one per query), and Try k = scenario k, try 1. Tries 2–5 of those scenarios are reported but not counted.
 
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| 1. Matching query completes all three tools | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. Impossible query stops before suggest_outfit | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. Same item id reaches suggest_outfit and create_fit_card | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 4. Fit card names item, $price, platform | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 5. Model failure handled without a crash | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 1 (revised). Fit card is for the item asked about (boots query) | 4 of 5 | FAIL | FAIL | FAIL | FAIL | FAIL | MISSED (0/5) |
+| _Diagnostic: empty wardrobe_ | — | advice | advice | advice | advice | advice | no crash, 5/5 |
 
-**Real output from one try**, pasted as text, naming the file and function
-that produced it:
+Extra evidence for criteria 3–5: all 25 tries of the criterion 3/4 scenarios had matching ids and a fit card with the name, price, and platform, and all 25 criterion 5 tries were handled cleanly.
 
+**Real output from one try per criterion**
+
+Criterion 1, `agent.py::run_agent` via `run_eval.py::run_once`, query `vintage graphic tee under $30`, try 1:
+```
+- stopped early: no
+- selected_item: Y2K Baby Tee — Butterfly Print ($18.0, depop)
+Fit card:
+Still obsessed with how I scored this butterfly baby tee for just $18 on depop. I've been living in it—either dressed down with baggy denim and chunky sneakers or given a little edge tucked into khaki trousers with combat boots. Such a good find for channeling that early 2000s nostalgic street style. #y2k #vintagestyle
+```
+
+Criterion 2, `agent.py::run_agent` → `agent.py::_no_results_message`, query `designer ballgown size XXS under $5`, try 1:
+```
+- stopped early: yes — No listings matched 'designer ballgown'. Try broader words, like 'tee' instead of 'band tee', or 'pants' instead of 'cords'.
+- selected_item: (none)
+Trace: [1] parse_query → [2] search_listings (via MCP) → out: [] (empty) → branch: empty results, stopping before suggest_outfit
+```
+
+Criterion 3, trace from `agent.py::run_agent`, query `denim jacket under $50`, try 1:
+```
+[3] select_item         → took first result, id=lst_007
+[4] suggest_outfit      in: item_id='lst_007', wardrobe_items=10
+[5] create_fit_card     in: item_id='lst_007', outfit='…'
+```
+
+Criterion 4, `tools.py::create_fit_card`, query `tan suede boots under $50`, try 1 (title words "suede", "chelsea", "boots"; "$44"; "Poshmark"):
+```
+Score! Snagged these tan suede Chelsea boots on Poshmark for just $44 and I am officially obsessed. I've already been living in them—first paired with my baggy dark wash jeans and black denim jacket for a little western edge, and then dressed down with khaki trousers and an oversized grey crew for that cozy, minimal vibe. #ThriftFinds #EarthTones
+```
+
+Criterion 5, `agent.py::run_agent` `ModelUnavailable` handler, query `cargo pants under $40`, try 1:
+```
+- stopped early: yes — Model error during 'outfit': the model couldn't be reached (ModelUnavailable). Check your API key in .env, then try again.
+[4] outfit FAILED → ModelUnavailable, stopping
+```
+
+Criterion 1 (revised), query `black combat boots under $60`, try 1:
+```
+- selected_item: Biker Shorts — Black, Shiny ($14.0, depop)
+Fit card: Score! Snagged these shiny black biker shorts on Depop for just $14 and I'm obsessed with how they turned out. …
 ```
 
 ```
@@ -240,31 +275,22 @@ that produced it:
 
 ## Verdicts and Diagnoses
 
-<!-- MET or MISSED per criterion against LAST UNIT's target, plus a sentence on
-     how you decided.
-
-     Then, for every miss: which of the four places it happened — a tool, the
-     loop's branch, the session, or the model's output — AND the mechanism.
-
-     Not a diagnosis:  "The fit card was bad."
-     A diagnosis:      "The fit card criterion missed on 2 of 5 items. Both had
-                        an empty brand field. My prompt puts the brand in the
-                        first sentence, so the card opened with a blank and read
-                        like a fragment. The tool worked; the prompt assumed a
-                        field that isn't always there."
-
-     Look for a pattern. Three misses on the same tool is one problem, not
-     three. -->
-
 | # | Criterion | Target | Verdict | How I decided |
 |---|---|---|---|---|
-| 1 |  |  |  |  |
-| 2 |  |  |  |  |
-| 3 |  |  |  |  |
-| 4 |  |  |  |  |
-| 5 |  |  |  |  |
+| 1 | Matching query completes all three tools | 4 of 5 | MET (5/5) | All 5 tries ran parse → search → select → suggest_outfit → create_fit_card and returned a fit card. |
+| 2 | Impossible query stops before suggest_outfit | 5 of 5 | MET (5/5) | All 5 traces end at search_listings with `[] (empty)`, `fit_card` is None, and the message names a change ("try broader words"). |
+| 3 | State persists across tools | 5 of 5 | MET (5/5) | For q1–q5 try 1, the id at select_item, suggest_outfit, and create_fit_card is identical in the trace. |
+| 4 | Fit card names item, price, platform | 4 of 5 | MET (5/5) | Each q1–q5 try 1 card contains 2+ title words, `$` + the listing price, and the platform (case-insensitive). |
+| 5 | Model failure handled without a crash | 5 of 5 | MET (5/5) | Each c5 try 1 stopped with a message containing "error" and "try again", had no fit card, and logged no crash or traceback. |
+| 1R | Fit card is for the item asked about | 4 of 5 | MISSED (0/5) | All 5 boots-query tries selected Biker Shorts. |
 
 **Diagnoses**
+
+I met all five original targets, and some of them were too easy. Criterion 4 came out at 25 of 25 against a target of 4 of 5, so it's the one I'd tighten, for example by also requiring that the card never names a brand the listing doesn't have. Criterion 3 is close to unfailable as built: the trace records `item["id"]` from the same session read that the tool receives, so it mostly confirms the code reads the session rather than testing anything that could vary.
+
+**Criterion 1 (revised), missed 0/5. Place: a tool (`tools.py::search_listings`, via `_score`).** Mechanism: on `black combat boots under $60`, "black" in Biker Shorts — Black's title and "boots" in Suede Chelsea Boots — Tan's title each score +3. The tie goes to the cheaper item ($14 vs $44), and four other black items under $44 also outrank the boots, so the only boot under $60 ranked 6th. The loop then takes result #1 as designed. The branch, the session, and the model all worked; the tool's ranking treats a color word the same as the word naming the item. The original criterion 1 couldn't see this, because it only checked that a fit card came back, which is why I revised it.
+
+**Pattern:** every problem I found traces back to `search_listings` ranking, not the loop. The weak match also explains a smaller oddity in Unit 3, where a mesh top ranked first for "graphic tee" because of a description-only mention.
 
 
 
@@ -328,7 +354,7 @@ The empty path stops at step 2 and makes zero model calls. The happy path runs a
       →    empty wardrobe, general advice
 ```
 
-**3. Model unavailable.** Changing one character of the key in `.env` didn't trigger a failure for me. My first run after the edit still made 2 real model calls, and no system environment variable was overriding `.env`. So I forced it the way the assignment allows: I temporarily added `raise ModelUnavailable("forced for testing")` at the top of `tools.py::suggest_outfit`, ran a new query, then removed it (`git diff tools.py` is clean).
+**3. Model unavailable.** For the criterion 5 test run (`results/run_2026-10-12_0500_before-c5.md`), changing one character of the key in `.env` did make the model unreachable: all 25 tries raised `ModelUnavailable` through the real API path. My M2 attempt most likely didn't take effect because the edit wasn't saved before running.
 
 ```
 $ python app.py ask 'tan suede boots under $50' --trace
