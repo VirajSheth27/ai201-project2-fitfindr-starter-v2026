@@ -272,8 +272,6 @@ that produced it:
 
 ## Loop Trace
 
-## Loop Trace
-
 `search_listings` runs through the MCP server, shown as `search_listings (via MCP)` in step 2. Traces come from `trace.step()` calls in `agent.py::run_agent`.
 
 **Happy path**
