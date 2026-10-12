@@ -91,7 +91,9 @@ def search_listings(
 
     Returns: a list of listing objects, best match first. Matches in the title
     or style tags rank above matches only in the description; ties go to the
-    cheaper item. At most config.SEARCH_RESULT_LIMIT results. Each object has:
+    cheaper item. The last word of the description is treated as the item type and gets
+    extra weight when it appears in a title or tag, so "black combat boots"
+    ranks boots above other black items. At most config.SEARCH_RESULT_LIMIT results. Each object has:
     id, title, description, category, style_tags (list), size, condition,
     price (number), colors (list), brand (string or null), platform.
 

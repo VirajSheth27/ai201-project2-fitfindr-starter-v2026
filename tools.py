@@ -73,6 +73,11 @@ def _score(item: dict, keywords: list[str]) -> int:
     phrase = " ".join(keywords)
     if len(keywords) > 1 and phrase in strong_text:
         score += 5
+    # The last keyword is usually the item noun ("boots", "tee", "jacket").
+    # Without this, a color word like "black" counts as much as the item itself.
+    head = keywords[-1]
+    if _keyword_hit(head, strong_words):
+        score += 4
     return score
 
 

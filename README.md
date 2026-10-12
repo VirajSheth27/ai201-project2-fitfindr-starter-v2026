@@ -373,7 +373,7 @@ $ python app.py ask 'tan suede boots under $50' --trace
       →    ModelUnavailable, stopping
 
   Model error during 'outfit': the model couldn't be reached (ModelUnavailable). Check your API key in .env, then try again.
-```
+
 
 The `ModelUnavailable` handler in `agent.py::run_agent` catches it, stops the loop, leaves `fit_card` as `None`, and shows no traceback. My first attempt put the forced `raise` at module level in `tools.py`, so it fired on import, before the agent ran, and `app.py` printed the raw `ModelUnavailable: forced for testing`. The empty trace was the clue.
 
@@ -385,41 +385,54 @@ The `ModelUnavailable` handler in `agent.py::run_agent` catches it, stops the lo
 ---
 
 ## The Improvement
-
-<!-- What you changed, why your diagnosis pointed at it, and the after-run in
-     the same table format. One change, measured properly.
-
-     `python run_eval.py --label after` -->
-
-**What I changed:**
-
-**Which failure it was meant to fix:**
-
+ 
+**What I changed:** One change, in tools.py::_score. The last keyword of the parsed description (usually the item noun: "boots", "tee", "jacket") gets a +4 bonus when it appears in the listing's title or style_tags. I also updated the search_listings description in mcp_server.py so the published contract matches the new ranking. No other code changed.
+ 
+**Which failure it was meant to fix:** Criterion 1 (revised), which missed 0/5. On 'black combat boots under $60', "black" and "boots" each scored +3 in a title, the tie went to the cheaper item, and the agent selected Biker Shorts — Black instead of Suede Chelsea Boots — Tan. The diagnosis said the tool weighted a color word the same as the item word, so the fix targets exactly that weighting.
+ 
 ### Run Log — After
-
+ 
+From results/run_2026-10-12_0535_after.md (criteria 1–4) and results/run_2026-10-12_0543_after-c5b.md (criterion 5), same scenarios, caching off, temperature 0.9.
+ 
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
-
-**Did it help, and how do I know:**
-
-<!-- If it made things worse, say that. Honestly reported, that earns full
-     credit and is more interesting than one that worked. -->
+| 1. Matching query completes all three tools | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. Impossible query stops before suggest_outfit | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. Same item id reaches suggest_outfit and create_fit_card | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 4. Fit card names item, $price, platform | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 5. Model failure handled without a crash | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5)* |
+| 1 (revised). Fit card is for the item asked about (boots query) | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| Diagnostic: empty wardrobe | — | advice | advice | advice | advice | advice | no crash, 5/5 |
+ 
+*Criterion 5 deviation from my scoring rule: both of my "after" bad-key runs (results/run_2026-10-12_0538_after-c5.md and results/run_2026-10-12_0543_after-c5b.md) failed to pick up the FITFINDR_RUN=badkey switch in scenarios.py, so they ran the criteria 1–4 scenarios with a broken key instead of the five c5 queries. Criterion 5 says "across 5 distinct matching queries", so I scored it on the five c3/c4 queries (denim jacket, red flannel, suede boots, corduroy pants, track jacket), try 1 each, from the c5b run. Every one stopped with "Model error during 'outfit': the model couldn't be reached (ModelUnavailable). Check your API key in .env, then try again.", had no fit card, and none crashed. Across both runs, all 80 model-calling tries were handled the same way, and the impossible query still stopped at the branch. The before and after criterion 5 rows therefore use different queries, which I'm noting because it isn't the mapping I set in advance.
+ 
+**Real output, boots query, try 1 (after):**
+ 
+selected_item: Suede Chelsea Boots — Tan ($44.0, poshmark)\
+[3] select_item → took first result, id=lst_028\
+Fit card: Score on these vintage tan suede Chelsea boots for just $44 on Poshmark! I'm obsessed with how they pull together both my casual baggy denim look and these relaxed khaki trousers. Total earthy, effortless fall vibes. #thriftedstyle #vintagefashion
+ 
+**Real output, criterion 5, denim jacket query, try 1 (after, from the c5b run):**
+ 
+stopped early: yes — Model error during 'outfit': the model couldn't be reached (ModelUnavailable). Check your API key in .env, then try again.
+ 
+**Did it help, and how do I know:** Yes. The revised criterion 1 went from 0/5 to 5/5: every try on the boots query now selects Suede Chelsea Boots — Tan instead of Biker Shorts. The change didn't break anything else. Criteria 1–4 still pass 5/5, and every other scenario selected the same item before and after (butterfly tee, denim jacket, flannel, Chelsea boots, cords, track jacket), so the bonus only changed rankings where the item word was being outvoted.
 
 
 
 ---
 
 ## What's Still Broken
+ 
+All five original criteria and the revised criterion 1 are met after the fix, so nothing on my criteria list is still missed. These are the problems I found that my criteria don't cover:
+ 
+- **The empty-search message points at the wrong lever.** On 'designer ballgown size XXS under $5', it says "Try broader words, like 'tee' instead of 'band tee'" but never mentions the size XXS or $5 limits, and broader words alone would still fail under them. When I tested the message as a user who can't see the code, the answer was that I'd have to guess and drop filters one at a time. I wrote a fix (a _no_results_message that names the active filters and tests dropping both at once) but didn't apply it, because this unit allows only one improvement and the ranking bug was the one my diagnosis named. Criterion 2 passes on the letter ("names what to change") but not the spirit, so I'd tighten it to "names every active filter when one or more is set."
+- **The "last word is the item" rule is a heuristic.** It works when the item noun comes last ("black combat boots"), but a query like "boots in black" would boost "black" instead. Next I'd match keywords against the category field, mapping "boots" to shoes, rather than relying on word order.
+- **Search returns weak matches instead of nothing.** If the catalog had no boots at all, the boots query would still return black clothing and report success rather than reaching the empty-search branch. I'd add a minimum score, or require that the item word matches, before a result counts.
+- **Two of my criteria were too easy.** Criterion 4 passed 25/25 against a 4/5 target, and criterion 3 is close to unfailable as built. I'd tighten criterion 4 (for example, the card must mention the brand when the listing has one) and make criterion 3 compare the session against what the tool actually logged receiving, not the same variable.
+- **My criterion 5 "after" run didn't use the scenarios I planned.** The FITFINDR_RUN switch in scenarios.py didn't take effect in either attempt, and I didn't track down why. Next I'd verify the switch first by printing len(scenarios.SCENARIOS) in the same terminal before running, or pass the run mode as a command-line flag instead of an environment variable.
 
-<!-- For each criterion still missed: what you'd do, and why you stopped where
-     you did. "I ran out of time" is fine if it's true. Pretending nothing is
-     left is not. -->
-
+```
 
 
 <!-- ═════════════════════════════════════════════════════════════════════
